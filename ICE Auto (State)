@@ -1,0 +1,216 @@
+package org.firstinspires.ftc.teamcode.pedroPathing;
+
+
+import com.pedropathing.follower.Follower;
+import com.pedropathing.geometry.BezierLine;
+import com.pedropathing.geometry.Pose;
+import com.pedropathing.paths.PathChain;
+import com.pedropathing.util.Timer;
+import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DigitalChannel;
+import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.Servo;
+
+
+import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+
+
+@Autonomous
+public class ICEROBOTICS_B1_CODE extends OpMode {
+
+
+   public static double kP = 10.5;
+   public static double kI = 0.0;
+   public static double kD = 0.0;
+   public static double kF = 13.5;
+   PIDFCoefficients pidf = new PIDFCoefficients(kP, kI, kD, kF);
+   private Follower follower;
+   private Timer pathTimer, opModeTimer;
+
+
+   // Shooter and mechanism hardware
+   private DcMotorEx shooter;
+   private DcMotorEx shooter2;
+   private DcMotorEx booster;
+   private DcMotor frontIntake;
+   // private Servo gate;
+
+
+   //laser sensor
+   private DigitalChannel laserInput;
+
+
+   // Shooting configuration
+   private double targetTPS = -1450;
+   private double velocityTolerance = 150;
+
+
+   private double frontIntakeVelocity = -0.8;
+   private int ballsShot = 0;
+
+
+   public enum PathState {
+       DRIVE_STARTPOS_SHOOT_POS,
+       SHOOT_SEQUENCE,
+       // POST_SHOOT,
+       STOP
+   }
+
+
+   private PathState pathState;
+
+
+   private final Pose startPose = new Pose(47.58, 111.6, Math.toRadians(170.9));
+   private final Pose shootPose = new Pose(90, 110.87, Math.toRadians(170));
+
+
+   private PathChain driveStartPosShootPos, driveStartPosStop;
+
+
+   public void buildPaths() {
+
+
+       driveStartPosShootPos = follower.pathBuilder()
+               .addPath(new BezierLine(startPose, shootPose))
+               .setLinearHeadingInterpolation(startPose.getHeading(), shootPose.getHeading())
+               .build();
+
+
+
+
+   }
+
+
+   public void statePathUpdate() { // Removed 'throws InterruptedException' - not needed anymore
+       double elapsed = pathTimer.getElapsedTimeSeconds();
+       boolean detected = laserInput.getState();
+
+
+
+
+       switch(pathState) {
+           case DRIVE_STARTPOS_SHOOT_POS:
+               follower.setMaxPower(0.65);
+               if(!follower.isBusy() && elapsed < 0.5) {
+                   follower.followPath(driveStartPosShootPos, true);
+               }
+
+
+               if (!follower.isBusy() && elapsed > 0.5 ) {
+                   setPathState(PathState.SHOOT_SEQUENCE);
+               }
+               break;
+
+
+           case SHOOT_SEQUENCE:
+               frontIntake.setPower(frontIntakeVelocity);
+
+
+               // Only start the booster if the shooter is close to speed
+               if (Math.abs(shooter.getVelocity() - targetTPS) < velocityTolerance) {
+                   booster.setVelocity(-1000);
+               }
+
+
+               // Instead of wait(5000), we just stay in this state until the timer hits 5
+               if (elapsed > 15.0) {
+                   booster.setVelocity(0); // Turn off booster
+                   shooter.setVelocity(0);
+                   setPathState(PathState.STOP);
+               }
+               break;
+
+
+           case STOP:
+               frontIntake.setPower(0);
+               booster.setVelocity(0);
+               shooter.setVelocity(0);
+               follower.setMaxPower(0);
+
+
+       }
+   }
+
+
+   public void setPathState(PathState newState) {
+       pathState = newState;
+       pathTimer.resetTimer();
+   }
+
+
+   @Override
+   public void init() {
+       pathTimer = new Timer();
+       opModeTimer = new Timer();
+       ballsShot = 0;
+
+
+       frontIntake = hardwareMap.get(DcMotor.class, "frontintake");
+
+
+       shooter = hardwareMap.get(DcMotorEx.class, "shooter");
+       shooter.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
+       shooter2 = hardwareMap.get(DcMotorEx.class, "shooter2");
+       shooter2.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
+
+
+       booster = hardwareMap.get(DcMotorEx.class, "booster");
+       laserInput = hardwareMap.get(DigitalChannel.class, "lasersensor");
+       laserInput.setMode(DigitalChannel.Mode.INPUT);
+
+
+       boolean detected = laserInput.getState();
+
+
+       PIDFCoefficients pidf = new PIDFCoefficients(kP, kI, kD, kF);
+       shooter.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, pidf);
+       shooter2.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, pidf);
+
+
+       follower = Constants.createFollower(hardwareMap);
+       follower.setPose(startPose);
+       buildPaths();
+
+
+       pathState = PathState.DRIVE_STARTPOS_SHOOT_POS;
+   }
+
+
+   @Override
+   public void start() {
+       opModeTimer.resetTimer();
+       setPathState(PathState.DRIVE_STARTPOS_SHOOT_POS);
+   }
+
+
+   @Override
+   public void loop() {
+       shooter.setVelocity(targetTPS);
+       shooter2.setVelocity(targetTPS);
+       pidf = new PIDFCoefficients(kP, kI, kD, kF);
+       shooter.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, pidf);
+       shooter2.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, pidf);
+       follower.update();
+       statePathUpdate();
+
+
+       telemetry.addData("Path State", pathState);
+       telemetry.addData("State Time", (int)pathTimer.getElapsedTimeSeconds());
+       telemetry.addData("Balls Shot", ballsShot);
+       telemetry.addData("Is Busy", follower.isBusy());
+       telemetry.addData("x coordinate", follower.getPose().getX());
+       telemetry.addData("y coordinate", follower.getPose().getY());
+       telemetry.addData("heading", Math.toDegrees(follower.getPose().getHeading()));
+       telemetry.addData("targetTPS", targetTPS);;
+       telemetry.addData("Shooter Velocity", shooter.getVelocity());
+       telemetry.addData("Shooter2 Velocity", shooter2.getVelocity());
+       telemetry.update();
+       //return 0;
+   }
+
+
+}
