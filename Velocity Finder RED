@@ -1,0 +1,57 @@
+package org.firstinspires.ftc.teamcode.pedroPathing;
+
+
+public class VelocityFinderRed {
+
+
+   // Define the table as static arrays
+   private static final double[][] TABLE = {
+           {100.5, 54.4, -1475},
+           {92.2, 63.5, -1475},
+           {83.5, 73.0, -1450},
+           {30.5, 75.5, -1600},
+           {150.55, 97.58, -1475},
+           {126.59, 100.37, -1475},
+           {106.44, 81.77, -1475},
+           {131.86, 76.8, -1485},
+           {148.01, 76.8, -1500}
+
+
+   };
+
+
+   public static double findTargetVelocity(double xVal, double yVal) {
+       double minDistance = Double.MAX_VALUE;
+       double targetVelocity = 0;
+
+
+       for (double[] row : TABLE) {
+           double x = row[0];
+           double y = row[1];
+           double velocity = row[2];
+
+
+           // Calculate Euclidean distance
+           double distance = Math.sqrt(Math.pow(x - xVal, 2) + Math.pow(y - yVal, 2));
+
+
+           if (distance < minDistance) {
+               minDistance = distance;
+               targetVelocity = velocity;
+           }
+       }
+
+
+       return targetVelocity;
+   }
+
+
+   // Optional main method for testing
+   public static void main(String[] args) {
+       System.out.println(findTargetVelocity(90, 65));  // Should be close to velocity for (92.2, 63.5)
+       System.out.println(findTargetVelocity(85, 70));  // Should be close to velocity for (83.5, 73)
+       System.out.println(findTargetVelocity(100, 55)); // Should be close to velocity for (100.5, 54.4)
+       System.out.println(findTargetVelocity(40, 80)); // Should be close to velocity for (100.5, 54.4)
+   }
+}
+
