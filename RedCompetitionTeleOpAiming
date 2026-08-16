@@ -1,0 +1,415 @@
+package org.firstinspires.ftc.teamcode.pedroPathing;
+
+
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.hardware.CRServo;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.DigitalChannel;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.ColorSensor;
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
+import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.hardware.limelightvision.Limelight3A;
+import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+
+
+@TeleOp(name = "Competition TeleOp AutoAim Red Check!!", group = "Main")
+public class CompetitionTeleOpAimingRed extends LinearOpMode {
+
+
+   // ======== DRIVE MOTORS ========
+   private DcMotor leftFront, rightFront, leftBack, rightBack;
+
+
+   // ======== SHOOTER, INTAKE, BOOSTER, GATE ========
+   private DcMotorEx shooter;
+   private DcMotorEx shooter2;
+   private DcMotor frontIntake;
+   private DcMotorEx booster;
+   private DigitalChannel laserInput;
+
+
+   private static final double LED_RED = 0.32;
+   private static final double LED_GREEN = 0.5;
+   private static final double LED2_OFF = 0.0;
+
+
+
+
+   // ======== IMU ========
+   private IMU imu;
+
+
+   // ======== LIMELIGHT ========
+   private Limelight3A limelight;
+
+
+   // ======== STATES ========
+   private boolean gateOpen = false;
+   private boolean lastB = false;
+   private boolean lastY1 = false;
+
+
+   // ======== LIMELIGHT LOCK ========
+   private boolean limelightLock = false;
+   private boolean lastX1 = false;
+
+
+   private static final int TARGET_TAG_ID = 24;
+   private static final double LL_KP_ROT = 0.022;
+   private static final double LL_ROT_MAX = 0.35;
+   private static final double TX_DEADZONE = 1.2;
+
+
+   // ======== DEADZONE ========
+   private static final double STICK_DEADZONE = 0.10;
+
+
+   // ======== BOOSTER ========
+   private boolean forwardBoosterRunning = false;
+   private boolean reverseBoosterRunning = false;
+   private long forwardBoosterStartTime = 0;
+   private long reverseBoosterStartTime = 0;
+   private static final long FORWARD_BOOSTER_DURATION_MS = 240;
+   private static final long REVERSE_BOOSTER_DURATION_MS = 150;
+   private boolean lastY2 = false;
+  // private boolean forwardBoosterRunning = false;
+   // private boolean reverseBoosterRunning = false;
+   public static double boosterVelocity = -1000;
+   // private static final long FORWARD_BOOSTER_DURATION_MS = 240;
+   //private static final long REVERSE_BOOSTER_DURATION_MS = 150;
+   //private long forwardBoosterStartTime = 0;
+   //private long reverseBoosterStartTime = 0;
+   private long boosterEndTime = 0;
+
+
+   // ======== INTAKE ========
+   private int intakeState = 0;
+   private boolean lastLeftBumperPressed = false;
+   private boolean lastLeftTriggerPressed = false;
+
+
+   // ======== DRIVE SPEED ========
+   private double driveSpeed = 1.0;
+   private boolean lastDriveSpeedToggle = false;
+
+
+   // ======== PIDF SHOOTER ========
+   private static final double TARGET_RPM = 2600;
+   private static final double TICKS_PER_REV = 28.0;
+
+
+   private static final double kP = 11.5;
+   private static final double kI = 0;
+   private static final double kD = 0;
+   private static final double kF = 13.5;
+
+
+   private double integralSum = 0;
+   private double lastError = 0;
+   private double lastTime = 0;
+
+
+   @Override
+   public void runOpMode() throws InterruptedException {
+
+
+       // ======== HARDWARE MAP ========
+       leftFront  = hardwareMap.get(DcMotor.class, "leftfront_wheel");
+       rightFront = hardwareMap.get(DcMotor.class, "rightfront_wheel");
+       leftBack   = hardwareMap.get(DcMotor.class, "leftback_wheel");
+       rightBack  = hardwareMap.get(DcMotor.class, "rightback_wheel");
+
+
+       shooter     = hardwareMap.get(DcMotorEx.class, "shooter");
+       shooter2    = hardwareMap.get(DcMotorEx.class, "shooter2");
+       frontIntake = hardwareMap.get(DcMotor.class, "frontintake");
+       imu         = hardwareMap.get(IMU.class, "imu");
+       limelight   = hardwareMap.get(Limelight3A.class, "limelight");
+       booster     = hardwareMap.get(DcMotorEx.class, "booster");
+
+
+       // ======== IMU INIT ========
+       imu.initialize(new IMU.Parameters(
+               new RevHubOrientationOnRobot(
+                       RevHubOrientationOnRobot.LogoFacingDirection.LEFT,
+                       RevHubOrientationOnRobot.UsbFacingDirection.FORWARD
+               )
+       ));
+
+
+       // ======== LIMELIGHT INIT ========
+       limelight.start();
+       limelight.pipelineSwitch(0);
+
+
+       // ========= LASER SETUP ===========
+       laserInput = hardwareMap.get(DigitalChannel.class, "lasersensor");
+       laserInput.setMode(DigitalChannel.Mode.INPUT);
+       boolean detected = laserInput.getState();
+
+
+       // ======== DRIVE SETUP ========
+       leftFront.setDirection(DcMotorSimple.Direction.FORWARD);
+       leftBack.setDirection(DcMotorSimple.Direction.FORWARD);
+       rightFront.setDirection(DcMotorSimple.Direction.REVERSE);
+       rightBack.setDirection(DcMotorSimple.Direction.REVERSE);
+
+
+       leftFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+       rightFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+       leftBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+       rightBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
+
+       leftFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+       rightFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+       leftBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+       rightBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+
+
+       // ======== SHOOTER SETUP ========
+       shooter.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+       shooter.setDirection(DcMotorSimple.Direction.REVERSE);
+       shooter2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+       shooter2.setDirection(DcMotorSimple.Direction.REVERSE);
+
+
+
+
+       telemetry.addLine("TeleOp Ready 🚀");
+       telemetry.update();
+       waitForStart();
+
+
+       while (opModeIsActive()) {
+
+
+           // ======== HEADING ========
+           double heading = -imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+           heading = wrapTo180(heading);
+
+
+           // ======== RESET HEADING ========
+           if (gamepad1.y && !lastY1) imu.resetYaw();
+           lastY1 = gamepad1.y;
+
+
+           // ======== LIMELIGHT TOGGLE ========
+           if (gamepad1.x && !lastX1) limelightLock = !limelightLock;
+           lastX1 = gamepad1.x;
+
+
+           // ======== JOYSTICKS ========
+           double rawY  = applyDeadzone(gamepad1.right_stick_y);
+           double rawX  = applyDeadzone(-gamepad1.right_stick_x);
+           double rawRx = applyDeadzone(-gamepad1.left_stick_x);
+
+
+           double y  = Math.copySign(rawY * rawY, rawY);
+           double x  = Math.copySign(rawX * rawX, rawX) * 1.1;
+           double rx = Math.copySign(rawRx * rawRx, rawRx);
+
+
+           // ======== LIMELIGHT AUTO ROTATION (ADDITIVE) ========
+           if (limelightLock) {
+               rx += getLimelightRotation();
+           }
+
+
+           // ======== FIELD CENTRIC ========
+           double rotatedX = x * Math.cos(Math.toRadians(heading)) - y * Math.sin(Math.toRadians(heading));
+           double rotatedY = x * Math.sin(Math.toRadians(heading)) + y * Math.cos(Math.toRadians(heading));
+
+
+           // ======== SPEED TOGGLE ========
+           if (gamepad1.right_bumper && !lastDriveSpeedToggle)
+               driveSpeed = (driveSpeed == 1.0) ? 0.3 : 1.0;
+           lastDriveSpeedToggle = gamepad1.right_bumper;
+           telemetry.addData("drive speed", driveSpeed);
+
+
+           // ======== MECANUM DRIVE ========
+           double denominator = Math.max(Math.abs(rotatedY) + Math.abs(rotatedX) + Math.abs(rx), 1.0);
+           leftFront.setPower((rotatedY + rotatedX + rx) / denominator * driveSpeed);
+           leftBack.setPower((rotatedY - rotatedX + rx) / denominator * driveSpeed);
+           rightFront.setPower((rotatedY - rotatedX - rx) / denominator * driveSpeed);
+           rightBack.setPower((rotatedY + rotatedX - rx) / denominator * driveSpeed);
+
+
+           // ======== PIDF SHOOTER ========
+           double currentRPM = getShooterRPM();
+           double pidfPower = calculateShooterPower(TARGET_RPM, currentRPM);
+           shooter.setPower(pidfPower);
+           shooter2.setPower(pidfPower);
+
+
+           // ======== INTAKE ========
+           boolean lb = gamepad2.left_bumper;
+           boolean lt = gamepad2.left_trigger > 0.5;
+
+
+           if (lb && !lastLeftBumperPressed) intakeState = (intakeState == 1) ? 0 : 1;
+           if (lt && !lastLeftTriggerPressed) intakeState = (intakeState == 2) ? 0 : 2;
+
+
+           lastLeftBumperPressed = lb;
+           lastLeftTriggerPressed = lt;
+
+
+           frontIntake.setPower(
+                   intakeState == 1 ? -1.0 :
+                           intakeState == 2 ?  1.0 : 0.0
+           );
+
+
+           // =========== BOOSTER ===========
+           long now = System.currentTimeMillis();
+           telemetry.addData("Right Bumper", gamepad2.right_bumper);
+
+
+           // 1. Trigger the 3-second window when the button is pressed
+      /* if(gamepad2.rightBumperWasPressed()) {
+           if(isManualOverrideEnabled) {
+               shooter.setVelocity(manualOverrideTargetTPS);
+               shooter2.setVelocity(manualOverrideTargetTPS);
+           }
+
+
+           // Set the end time to 3000 milliseconds (3 seconds) from "now"
+           boosterEndTime = System.currentTimeMillis() + 3000;
+       }*/
+
+
+// Optional: Keep your telemetry for shooter status
+           if(System.currentTimeMillis() < boosterEndTime) {
+               telemetry.addData("Shooter Actual Velocity ", shooter.getVelocity());
+           }
+
+
+           if(!detected){
+               booster.setVelocity(-100);
+               telemetry.addData("detected", detected);
+           }
+
+
+           if(detected && !gamepad2.right_bumper){
+               booster.setVelocity(0);
+           } else {
+               booster.setVelocity(boosterVelocity);
+           }
+
+
+           if(gamepad2.right_bumper){
+               boosterEndTime = System.currentTimeMillis() + 3000;
+               if (System.currentTimeMillis() < boosterEndTime) {
+                   // We are still within the 3-second window
+                   booster.setVelocity(boosterVelocity);
+
+
+                   // Telemetry inside the active window
+                   telemetry.addData("Booster Status", "Running for 3 seconds...");
+                   telemetry.addData("Time Remaining", (boosterEndTime - System.currentTimeMillis()) / 1000.0);
+               } else {
+                   // 3 seconds have passed, or button wasn't pressed yet
+                   booster.setVelocity(0);
+
+
+               }
+           }
+
+
+
+
+
+
+           // ======== TELEMETRY ========
+           telemetry.addData("LL Lock", limelightLock);
+           telemetry.addData("Target Tag", TARGET_TAG_ID);
+           telemetry.addData("Target RPM", TARGET_RPM);
+           telemetry.addData("Current RPM", "%.1f", currentRPM);
+           telemetry.addData("Shooter Power", "%.3f", pidfPower);
+           telemetry.addData("realtimeshooterpower", "%.3f", shooter.getPower());
+           telemetry.update();
+
+
+           sleep(20);
+       }
+   }
+
+
+   // ======== LIMELIGHT ROTATION ========
+   private double getLimelightRotation() {
+       LLResult result = limelight.getLatestResult();
+       if (result == null || !result.isValid()) return 0.0;
+
+
+       for (LLResultTypes.FiducialResult tag : result.getFiducialResults()) {
+           if (tag.getFiducialId() == TARGET_TAG_ID) {
+               double tx = result.getTx() - 15;
+               telemetry.addData("tx", result.getTx());
+               if (Math.abs(tx) < TX_DEADZONE) return 0.0;
+               double rot = (-tx) * LL_KP_ROT;
+               return Math.max(-LL_ROT_MAX, Math.min(LL_ROT_MAX, rot));
+           }
+       }
+       return 0.0;
+
+
+   }
+
+
+   // ======== PIDF HELPERS ========
+   private double getShooterRPM() {
+       return (shooter.getVelocity() * 60.0) / TICKS_PER_REV;
+   }
+
+
+   private double calculateShooterPower(double targetRPM, double actualRPM) {
+       double currentTime = System.nanoTime() / 1e9;
+       double deltaTime = (lastTime == 0) ? 0.01 : (currentTime - lastTime);
+
+
+       double error = targetRPM - actualRPM;
+       double P = kP * error;
+
+
+       integralSum += error * deltaTime;
+       double I = kI * integralSum;
+
+
+       double derivative = (deltaTime > 0) ? (error - lastError) / deltaTime : 0;
+       double D = kD * derivative;
+
+
+       double F = kF * (targetRPM / TARGET_RPM);
+
+
+       lastError = error;
+       lastTime = currentTime;
+
+
+       double output = P + I + D + F;
+       return Math.max(-1, Math.min(1, output));
+   }
+
+
+   // ======== HELPERS ========
+   private double applyDeadzone(double value) {
+       return Math.abs(value) > STICK_DEADZONE ? value : 0.0;
+   }
+
+
+   private double wrapTo180(double angle) {
+       angle %= 360.0;
+       if (angle >= 180) angle -= 360;
+       if (angle < -180) angle += 360;
+       return angle;
+   }
+}
+
